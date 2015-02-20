@@ -1,7 +1,11 @@
 /**
- *  Turn off thermostat when mode changed to X
+ *  Synchronize one thermostat with another one
+ *  This app written for my living room with conventional gas radiator heat and additional mini-split system
  *
- *  Copyright 2014 skp19
+ *  It checks every 10 minutes (or during setPointChange event) if the system needs slave thermostat to kick in.
+ *
+ *
+ *  Copyright 2015 Andrei Zharov
  *
  */
 definition(
@@ -20,6 +24,7 @@ preferences {
     }
     section("Controls this thermostat") {
         input "slave", "capability.thermostat", multiple: false
+        input "tempThreshold", "number", title: "Temperature Difference for slave to turn on"
         input "notify", "bool", title: "Notify?"
     }
 }
@@ -50,49 +55,160 @@ def updated() {
  * @return
  */
 def subscribeToEvents() {
-    subscribe(master, "heatingSetpoint", heatingSetpointHandler)
-    subscribe(master, "coolingSetpoint", coolingSetpointHandler)
+    subscribe(master, "heatingSetpoint", setpointHandler);
+    subscribe(master, "coolingSetpoint", setpointHandler);
+    scheduleTemperatureCheck();
+}
+
+/**
+ * Schedule check every 10 min
+ * @return
+ */
+def scheduleTemperatureCheck() {
+    runEvery10Minutes(checkIfSlaveIsNeeded);
+}
+
+/**
+ * Check room temperature every 10 minutes and if it's more than threshold, turn on the slave,
+ * if it's less or equal then turn off the slave
+ */
+def checkIfSlaveIsNeeded() {
+    def masterMode = master.currentThermostatMode;
+    def slaveMode = slave.currentThermostatMode;
+
+    def masterHeatingTemp = master.currentHeatingSetpoint.toInteger();
+    def masterCoolingTemp = master.currentCoolingSetpoint.toInteger();
+    def slaveCoolingTemp = slave.currentCoolingSetpoint.toInteger();
+    def slaveHeatingTemp = slave.currentHeatingSetpoint.toInteger();
+
+    def roomTemperature = master.currentValue("temperature").toInteger();
+
+    log.debug "---Performing scheduled check---";
+    log.debug "Master mode is: $masterMode";
+    log.debug "masterHeatingTemp is: $masterHeatingTemp";
+    log.debug "masterCoolingTemp is: $masterCoolingTemp";
+    log.debug "Slave Mode is: $slaveMode";
+    log.debug "slaveCoolingTemp is: $slaveCoolingTemp";
+    log.debug "slaveHeatingTemp is: $slaveHeatingTemp";
+    log.debug "roomTemperature is: $roomTemperature";
+    log.debug "tempThreshold is: $tempThreshold";
+    log.debug "---Completed Check ---"
+
+    def needSlaveToHeat = (masterMode == "heat" && masterHeatingTemp >= roomTemperature + tempThreshold);
+    def needSlaveToCool = (masterMode == "cool" && roomTemperature >= masterCoolingTemp + tempThreshold);
+    def slaveAlreadyHeatingToTemp = (slaveMode == "heat" && masterHeatingTemp == slaveHeatingTemp);
+    def slaveAlreadyCoolingToTemp = (slaveMode == "cool" && masterCoolingTemp == slaveCoolingTemp);
+
+    // if both systems in the same mode and
+    def canTurnOffSlave = (slaveMode == "heat" && masterMode == "heat" && slaveHeatingTemp >= roomTemperature) ||
+            (slaveMode == "cool" && masterMode == "cool" && slaveCoolingTemp <= roomTemperature);
+
+    log.debug "---Decision Points---";
+    log.debug "needSlaveToHeat: $needSlaveToHeat";
+    log.debug "needSlaveToCool: $needSlaveToCool";
+    log.debug "canTurnOffSlave: $canTurnOffSlave";
+    log.debug "slaveAlreadyHeatingToTemp: $slaveAlreadyHeatingToTemp";
+    log.debug "slaveAlreadyCoolingToTemp: $slaveAlreadyCoolingToTemp";
+    log.debug "--- End Decision Points---"
+
+    if (needSlaveToHeat && !slaveAlreadyHeatingToTemp) {
+        // if current mode is heat and desired temp more than current by tempThreshold degree
+        log.debug "Current mode is heat and desired temp more than current by tempThreshold degree";
+        log.debug "Syncing slave with master";
+        syncSlaveWithMaster(masterHeatingTemp.toDouble());
+    } else if (needSlaveToCool && !slaveAlreadyCoolingToTemp) {
+        // if current mode is cool and desired temp less than current by tempThreshold degree
+        log.debug "Syncing slave with master";
+        log.debug "Current mode is cool and desired temp more than current by tempThreshold degree";
+        syncSlaveWithMaster(masterCoolingTemp.toDouble());
+    } else if (canTurnOffSlave) {
+        // we don't need slave
+        log.debug "Turn off slave as it's not needed";
+        turnOffSlave();
+    } else {
+        log.debug "No changes this checkIfSlaveIsNeeded cycle";
+    }
+}
+
+/**
+ * Sync master mode to slave mode
+ */
+def setMode() {
+    def masterMode = master.currentThermostatMode;
+    def slaveMode = slave.currentThermostatMode;
+
+    log.debug "Master thermostat mode is: $masterMode";
+    log.debug "Slave thermostat mode is: $slaveMode";
+
+    if (slaveMode != masterMode) {
+        log.debug "Sync master mode to slave: $masterMode";
+        slave."$masterMode"();
+    }
+
+    state.slaveMode = masterMode;
 }
 
 /**
  * Trigger for `heatingSetpoint` event from master
  * @param evt SmartThings event
- * @return
  */
-def heatingSetpointHandler(evt) {
-    log.debug "heatingSetpoint: $evt"
-    log.debug "heatingSetpoint value: $evt.value"
-    state.heatingTemperature = evt.value.toDouble();
-    log.debug "Setting slave to heat mode";
-    slave.heat();
-    log.debug "Scheduling setHeatingSetpoint in 20s";
-    runIn(20, "setHeatingSetpoint");
-}
-def setHeatingSetpoint() {
-    log.debug "Settung scheduled heating temperature value: $state.heatingTemperature"
-    slave.setHeatingSetpoint(state.heatingTemperature);
-    sendMessage("Slave thermostat has been changed to $state.heatingTemperature F in heat mode");
+def setpointHandler(evt) {
+    log.debug "New Setpoint value: $evt.value";
+    checkIfSlaveIsNeeded();
 }
 
 /**
- * Trigger for `coolingSetpoint` event from master
- * @param evt SmartThings event
+ * Synchronise slave temperature and mode with master
+ * setNewTemperature is delayed because both events will be send by IR and slave needs some time
+ * to process them one by one
+ *
+ * @param temp
  * @return
  */
-def coolingSetpointHandler(evt) {
-    log.debug "coolingSetpoint: $evt"
-    log.debug "coolingSetpoint value: $evt.value";
-    state.coolingTemperature = evt.value.toDouble();
-    log.debug "Setting slave to cool mode";
-    slave.cool();
-    log.debug "Scheduling setCoolingSetpoint in 20s";
-    runIn(20, "setCoolingSetpoint");
+def syncSlaveWithMaster(temp) {
+    state.temperature = temp;
+    setMode();
+    startTimer(10, "setNewTemperature");
 }
 
-def setCoolingSetpoint() {
-    log.debug "Settung scheduled cooling temperature value: $state.heatingTemperature"
-    slave.setHeatingSetpoint(state.coolingTemperature);
-    sendMessage("Slave thermostat has been changed to $state.coolingTemperature F in cool mode");
+/**
+ * Set new temperature to slave
+ * @return
+ */
+def setNewTemperature() {
+    log.debug "Setting scheduled temperature value: $state.temperature";
+
+    if (state.slaveMode == "heat") {
+        slave.setHeatingSetpoint(state.temperature);
+    } else if (state.slaveMode == "cool") {
+        slave.setCoolingSetpoint(state.temperature);
+    }
+
+    sendMessage("Slave thermostat has been changed to $state.temperature F in $state.slaveMode mode");
+}
+
+/**
+ * Turn off slave
+ * @return
+ */
+def turnOffSlave() {
+    state.slaveMode = "off";
+    slave.off();
+    sendMessage("Slave thermostat has been turned off");
+}
+
+/**
+ * Helper function to schedule an event in x seconds
+ * @param seconds Delay before calling a function
+ * @param function Method to call in x seconds
+ * @return
+ */
+def startTimer(seconds, function) {
+    log.debug "Scheduling slave setpoint in $seconds seconds";
+
+    def now = new Date();
+    def runTime = new Date(now.getTime() + (seconds * 1000));
+    runOnce(runTime, function) // runIn isn't reliable, use runOnce instead
 }
 
 /**
