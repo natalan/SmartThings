@@ -39,17 +39,17 @@ def changeMode(evt) {
 
     log.debug "New mode is $newMode"
     if (newMode == "AWAY") {
-        givenMode = "away"
-    } else if (newMode == "HOME") {
-        givenMode = "home"
+        givenMode = "Away"
+        sendEvent(name: "presence", value: "not present")
+    } else if (newMode == "HOME" || newMode == "MORNING") {
+        givenMode = "Home"
+        sendEvent(name: "presence", value: "present")
     } else if (newMode == "NIGHT") {
-        givenMode = "sleep"
-    } else if (newMode == "MORNING") {
-        givenMode = "awake"
+        givenMode = "Sleep"
     }
     message = "Setting thermostat(s) to $givenMode"
     log.debug message
-    thermostats?."$givenMode"()
+    thermostats?.setThisTstatClimate(givenMode)
     sendMessage(message)
 }
 
