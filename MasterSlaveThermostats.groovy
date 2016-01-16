@@ -57,6 +57,7 @@ def updated() {
 def subscribeToEvents() {
     subscribe(master, "heatingSetpoint", setpointHandler);
     subscribe(master, "coolingSetpoint", setpointHandler);
+    subscribe(master, "temperature", setpointHandler);
     scheduleTemperatureCheck();
 }
 
@@ -153,7 +154,8 @@ def setMode() {
  * @param evt SmartThings event
  */
 def setpointHandler(evt) {
-    log.debug "New Setpoint value: $evt.value";
+	log.debug "This event name is ${evt.name}"
+    log.debug "New Setpoint value: ${evt.value}";
     checkIfSlaveIsNeeded();
 }
 
