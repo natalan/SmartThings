@@ -96,13 +96,12 @@ def checkIfSlaveIsNeeded() {
     log.debug "---Completed Check ---"
 
     def needSlaveToHeat = (masterMode == "heat" && masterHeatingTemp >= roomTemperature + tempThreshold);
-    def needSlaveToCool = (masterMode == "cool" && roomTemperature >= masterCoolingTemp + tempThreshold);
+    def needSlaveToCool = (masterMode == "cool" && masterCoolingTemp <= roomTemperature + tempThreshold);
     def slaveAlreadyHeatingToTemp = (slaveMode == "heat" && masterHeatingTemp == slaveHeatingTemp);
     def slaveAlreadyCoolingToTemp = (slaveMode == "cool" && masterCoolingTemp == slaveCoolingTemp);
 
-    // if both systems in the same mode and
-    def canTurnOffSlave = (slaveMode == "heat" && masterMode == "heat" && masterHeatingTemp <= roomTemperature) ||
-            (slaveMode == "cool" && masterMode == "cool" && masterCoolingTemp >= roomTemperature);
+    // if both systems in the same mode and we don't need slave
+    def canTurnOffSlave = (slaveMode != "off") && (slaveMode == masterMode) && (needSlaveToHeat == false && needSlaveToCool == false);
 
     log.debug "---Decision Points---";
     log.debug "needSlaveToHeat: $needSlaveToHeat";
