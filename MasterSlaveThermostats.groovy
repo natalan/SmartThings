@@ -95,33 +95,33 @@ def checkIfSlaveIsNeeded() {
     log.debug "tempThreshold is: $tempThreshold";
     log.debug "---Completed Check ---"
 
-    def needSlaveToHeat = (masterMode == "heat" && masterHeatingTemp >= roomTemperature + tempThreshold);
-    def needSlaveToCool = (masterMode == "cool" && masterCoolingTemp <= roomTemperature + tempThreshold);
+    def needStartSlaveToHeat = (masterMode == "heat" && masterHeatingTemp >= roomTemperature + tempThreshold);
+    def needStartSlaveToCool = (masterMode == "cool" && masterCoolingTemp <= roomTemperature + tempThreshold);
     def slaveAlreadyHeatingToTemp = (slaveMode == "heat" && masterHeatingTemp == slaveHeatingTemp);
     def slaveAlreadyCoolingToTemp = (slaveMode == "cool" && masterCoolingTemp == slaveCoolingTemp);
 
-    // if both systems in the same mode and we don't need slave
-    def canTurnOffSlave = (slaveMode != "off") && (slaveMode == masterMode) && (needSlaveToHeat == false && needSlaveToCool == false);
+    // if both systems in the same mode and we don't need slave and room temperature is better than set on master thermostat
+    def needTurnOffSlave = (slaveMode != "off") && (slaveMode == masterMode) && (needStartSlaveToHeat == false && needSlaveToCool == false) && (masterHeatingTemp <= roomTemperature || masterCoolingTemp >= roomTemperature);
 
     log.debug "---Decision Points---";
-    log.debug "needSlaveToHeat: $needSlaveToHeat";
-    log.debug "needSlaveToCool: $needSlaveToCool";
-    log.debug "canTurnOffSlave: $canTurnOffSlave";
+    log.debug "needStartSlaveToHeat: $needStartSlaveToHeat";
+    log.debug "needStartSlaveToCool: $needStartSlaveToCool";
+    log.debug "needTurnOffSlave: $needTurnOffSlave";
     log.debug "slaveAlreadyHeatingToTemp: $slaveAlreadyHeatingToTemp";
     log.debug "slaveAlreadyCoolingToTemp: $slaveAlreadyCoolingToTemp";
     log.debug "--- End Decision Points---"
 
-    if (needSlaveToHeat && !slaveAlreadyHeatingToTemp) {
+    if (needStartSlaveToHeat && !slaveAlreadyHeatingToTemp) {
         // if current mode is heat and desired temp more than current by tempThreshold degree
         log.debug "Current mode is heat and desired temp more than current by tempThreshold degree";
         log.debug "Syncing slave with master";
         syncSlaveWithMaster(masterHeatingTemp.toDouble());
-    } else if (needSlaveToCool && !slaveAlreadyCoolingToTemp) {
+    } else if (needStartSlaveToCool && !slaveAlreadyCoolingToTemp) {
         // if current mode is cool and desired temp less than current by tempThreshold degree
         log.debug "Syncing slave with master";
         log.debug "Current mode is cool and desired temp more than current by tempThreshold degree";
         syncSlaveWithMaster(masterCoolingTemp.toDouble());
-    } else if (canTurnOffSlave) {
+    } else if (needTurnOffSlave) {
         // we don't need slave
         log.debug "Turn off slave as it's not needed";
         turnOffSlave();
